@@ -10,6 +10,8 @@ import torch.distributions as td
 import torch.utils.data
 from torch.nn import functional as F
 from tqdm import tqdm
+import numpy as np
+from sklearn.decomposition import PCA
 
 
 class GaussianPrior(nn.Module):
@@ -59,6 +61,33 @@ class GaussianEncoder(nn.Module):
            A tensor of dimension `(batch_size, feature_dim1, feature_dim2)`
         """
         mean, std = torch.chunk(self.encoder_net(x), 2, dim=-1)
+        return td.Independent(td.Normal(loc=mean, scale=torch.exp(std)), 1)
+
+
+class MoGEncoder(nn.Module):
+    def __init__(self, encoder_net):
+        """
+        Define a Gaussian encoder distribution based on a given encoder network.
+
+        Parameters:
+        encoder_net: [torch.nn.Module]             
+           The encoder network that takes as a tensor of dim `(batch_size,
+           feature_dim1, feature_dim2)` and output a tensor of dimension
+           `(batch_size, 2M)`, where M is the dimension of the latent space.
+        """
+        super(GaussianEncoder, self).__init__()
+        self.encoder_net = encoder_net
+
+    def forward(self, x):
+        """
+        Given a batch of data, return a Gaussian distribution over the latent space.
+
+        Parameters:
+        x: [torch.Tensor] 
+           A tensor of dimension `(batch_size, feature_dim1, feature_dim2)`
+        """
+        mean, std = torch.chunk(self.encoder_net(x), 2, dim=-1)
+        td.MixtureSameFamily(td.Categorical(torch.ones(10)), td.Independent(td.Normal(loc=mean, scale=torch.exp(std)), 1))
         return td.Independent(td.Normal(loc=mean, scale=torch.exp(std)), 1)
 
 
@@ -192,7 +221,7 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('--mode', type=str, default='approximate_posterior', choices=['train', 'sample', 'approximate_posterior'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'], help='torch device (default: %(default)s)')
@@ -252,8 +281,19 @@ if __name__ == "__main__":
         # Train model
         train(model, optimizer, mnist_train_loader, args.epochs, args.device)
 
+        model.eval()
+        with torch.no_grad():
+            # Generate samples
+            elbos = list()
+            for batch in tqdm(mnist_test_loader):
+                x, y = batch
+                x = x.to(device)
+                elbos.append(model.elbo(x).cpu().numpy())
+            
+        mean_elbo = np.mean(elbos)
+
         # Save model
-        torch.save(model.state_dict(), args.model)
+        torch.save(model.state_dict(), args.model + f'.{mean_elbo:.2f}')
 
     elif args.mode == 'sample':
         model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
@@ -263,3 +303,31 @@ if __name__ == "__main__":
         with torch.no_grad():
             samples = (model.sample(64)).cpu() 
             save_image(samples.view(64, 1, 28, 28), args.samples)
+
+    elif args.mode == 'approximate_posterior':
+        import matplotlib.pyplot as plt
+
+        model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
+
+        model.eval()
+
+        encodings = list()
+        labels = list()
+        with torch.no_grad():
+            for batch in tqdm(mnist_train_loader):
+                x, y = batch
+                x = x.to(device)
+                
+                model.encoder(x)
+                encodings.append(model.encoder(x).sample().detach().cpu().numpy())
+                labels.append(y.numpy())
+        
+        encodings = np.concatenate(encodings)
+        labels = np.concatenate(labels)
+        pca = PCA(n_components=2)
+        latent2d = pca.fit_transform(encodings)
+
+        plt.scatter(latent2d[:, 0], latent2d[:, 1], c=labels, cmap='tab10')
+        plt.colorbar()
+        # save plot
+        plt.savefig('approximate posterior.png')
