@@ -53,8 +53,9 @@ class MaskedCouplingLayer(nn.Module):
         self.scale_net = scale_net
         self.translation_net = translation_net
         self.mask = nn.Parameter(mask, requires_grad=False)
+        self.inverted_mask = nn.Parameter(1 - mask, requires_grad=False)
 
-    def forward(self, z):
+    def forward(self, z: torch.Tensor):
         """
         Transform a batch of data through the coupling layer (from the base to data).
 
@@ -67,11 +68,12 @@ class MaskedCouplingLayer(nn.Module):
         sum_log_det_J: [torch.Tensor]
             The sum of the log determinants of the Jacobian matrices of the forward transformations of dimension `(batch_size, feature_dim)`.
         """
-        x = z
-        log_det_J = torch.zeros(z.shape[0])
+        scale_net_output = self.scale_net(self.mask * z)
+        x = self.mask * z + self.inverted_mask * (z * torch.exp(scale_net_output) + self.translation_net(self.mask * z))
+        log_det_J = torch.sum(self.inverted_mask * scale_net_output, dim=-1)
         return x, log_det_J
     
-    def inverse(self, x):
+    def inverse(self, x: torch.Tensor):
         """
         Transform a batch of data through the coupling layer (from data to the base).
 
@@ -84,8 +86,8 @@ class MaskedCouplingLayer(nn.Module):
         sum_log_det_J: [torch.Tensor]
             The sum of the log determinants of the Jacobian matrices of the inverse transformations.
         """
-        z = x
-        log_det_J = torch.zeros(x.shape[0])
+        z = self.mask * x + self.inverted_mask * (x - self.translation_net(self.mask * x)) * torch.exp(-self.scale_net(self.mask * x))
+        log_det_J = -self.forward(z)[1]
         return z, log_det_J
 
 
@@ -230,8 +232,8 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
-    parser.add_argument('--data', type=str, default='tg', choices=['tg', 'cb'], help='toy dataset to use {tg: two Gaussians, cb: chequerboard} (default: %(default)s)')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('--data', type=str, default='mnist', choices=['tg', 'cb', 'mnist'], help='toy dataset to use {tg: two Gaussians, cb: chequerboard} (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'], help='torch device (default: %(default)s)')
@@ -249,9 +251,27 @@ if __name__ == "__main__":
     # Generate the data
     n_data = 10000000
     batch_size = 10000
-    toy = {'tg': ToyData.TwoGaussians, 'cb': ToyData.Chequerboard}[args.data]()
-    train_loader = torch.utils.data.DataLoader(toy().sample((n_data,)), batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(toy().sample((n_data,)), batch_size=batch_size, shuffle=True)
+
+    if args.data == 'mnist':
+        # Load MNIST dataset
+        # collate function to remove labels
+        collate_fn = lambda batch: torch.stack([x for x, _ in batch], 0)
+        _transforms = transforms.Compose ([
+            transforms.ToTensor (),
+            transforms.Lambda(lambda x: x + torch.rand(x.shape)/255),
+            transforms.Lambda(lambda x: x.flatten ())
+        ])
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST('data', train=True, download=True, transform=_transforms),
+            batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST('data', train=False, transform=_transforms),
+            batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+
+    else:
+        toy = {'tg': ToyData.TwoGaussians, 'cb': ToyData.Chequerboard}[args.data]()
+        train_loader = torch.utils.data.DataLoader(toy().sample((n_data,)), batch_size=batch_size, shuffle=True)
+        test_loader = torch.utils.data.DataLoader(toy().sample((n_data,)), batch_size=batch_size, shuffle=True)
 
     # Define prior distribution
     D = next(iter(train_loader)).shape[1]
