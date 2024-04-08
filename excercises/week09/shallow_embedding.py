@@ -106,11 +106,13 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
                 acc[split_idx, emb_idx] = accuracy
     else:
         acc = torch.load('acc.pt', map_location=device)
+        assert acc.shape[0] == n_splits, 'Number of splits does not match'
+        assert acc.shape[1] == len(embedding_dim_space), 'Number of embedding dimensions does not match'
 
     error = acc.mean(0)
     print(f'Error:')
     for emb_dim, err in zip(embedding_dim_space, error):
-        print(f'Embedding dimension: {emb_dim:<3}, Error: {err:.5f}')
+        print(f'Embedding dimension: {emb_dim:>3}, Error: {err:.5f}')
     best_hyperparams_idx = error.argmax()
     best_hyperparams = embedding_dim_space[best_hyperparams_idx]
 
@@ -136,9 +138,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, help='cpu or cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--lr', default=1e-2, type=float, help='learning rate')
     parser.add_argument('--max_step', default=100000, type=int, help='maximum number of steps')
-    parser.add_argument('--n_splits', default=10, type=int, help='number of splits for cross validation')
+    parser.add_argument('--n_splits', default=20, type=int, help='number of splits for cross validation')
     parser.add_argument('--min_embedding_dim', default=3, type=int, help='minimum embedding dimension')
-    parser.add_argument('--max_embedding_dim', default=7, type=int, help='maximum embedding dimension')
+    parser.add_argument('--max_embedding_dim', default=10, type=int, help='maximum embedding dimension')
     parser.add_argument('--embedding_dim_space', nargs='+', type=int, help='list of embedding dimensions will override min_embedding_dim and max_embedding_dim')
     parser.add_argument('--estimate_accuracy', action='store_true', help='Estimate accuracy')
 
