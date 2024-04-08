@@ -128,8 +128,8 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser("Shallow embedding")
     parser.add_argument('--device', type=str, help='cpu or cuda', choices=['cpu', 'cuda'])
-    parser.add_argument('--lr', default=1e-1, type=float, help='learning rate')
-    parser.add_argument('--max_step', default=10000, type=int, help='maximum number of steps')
+    parser.add_argument('--lr', default=1e-2, type=float, help='learning rate')
+    parser.add_argument('--max_step', default=100000, type=int, help='maximum number of steps')
     parser.add_argument('--n_splits', default=10, type=int, help='number of splits for cross validation')
     parser.add_argument('--min_embedding_dim', default=3, type=int, help='minimum embedding dimension')
     parser.add_argument('--max_embedding_dim', default=7, type=int, help='maximum embedding dimension')
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     lr = args.lr
     max_step = args.max_step
     n_splits = args.n_splits
-    embedding_dim_space = args.embedding_dim_space or list(range(args.min_embedding_dim, args.max_embedding_dim))
+    embedding_dim_space = args.embedding_dim_space or list(range(args.min_embedding_dim, args.max_embedding_dim + 1))
 
 
     main(device, lr, max_step, n_splits, embedding_dim_space)
