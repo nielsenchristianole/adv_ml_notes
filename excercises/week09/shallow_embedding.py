@@ -45,7 +45,7 @@ class Shallow(torch.nn.Module):
         self.embedding = torch.nn.Embedding(n_nodes, embedding_dim=embedding_dim)
         self.bias = torch.nn.Parameter(torch.tensor([0.]))
 
-    def forward(self, rx, tx):
+    def forward(self, rx, tx) -> torch.Tensor:
         '''Returns the probability of a links between nodes in lists rx and tx'''
         return torch.sigmoid((self.embedding.weight[rx]*self.embedding.weight[tx]).sum(1) + self.bias)
 
@@ -118,8 +118,8 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
     torch.save(model.state_dict(), 'model.pt')
     torch.save(acc.detach().cpu(), 'acc.pt')
 
-    link_probability = model(idx_all_pairs[0], idx_all_pairs[1])
-    torch.save(link_probability, 'link_probability.pt')
+    link_probability = model.forward(idx_all_pairs[0], idx_all_pairs[1])
+    torch.save(link_probability.detach().cpu(), 'link_probability.pt')
 
 
     
