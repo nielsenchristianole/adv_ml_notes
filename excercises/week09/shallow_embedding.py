@@ -104,6 +104,8 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
                 accuracy = test(model, test_idx_pairs, test_target)
 
                 acc[split_idx, emb_idx] = accuracy
+
+        torch.save(acc.detach().cpu(), 'acc.pt')
     else:
         acc = torch.load('acc.pt', map_location=device)
         assert acc.shape[0] == n_splits, 'Number of splits does not match'
@@ -118,16 +120,23 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
 
     print(f"Training best model, with embedding dimension: {best_hyperparams} and accuracy: {acc.mean(0).max():.5f}")
 
-    model = Shallow(n_nodes, best_hyperparams).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    train(model, optimizer, max_step, idx_all_pairs, target, cross_entropy)
+    predictions = torch.empty(idx_all_pairs.shape[1], device=device, dtype=torch.float32)
+    for split_idx, (train_idx, test_idx) in tqdm(enumerate(KFold(n_splits=n_splits, shuffle=True).split(idx_all_pairs[0])), total=n_splits, desc='Splits'):
+        train_idx, test_idx = torch.tensor(train_idx), torch.tensor(test_idx)
 
-    # save model statedict
-    torch.save(model.state_dict(), 'model.pt')
-    torch.save(acc.detach().cpu(), 'acc.pt')
+        train_idx_pairs = idx_all_pairs[:, train_idx]
+        test_idx_pairs = idx_all_pairs[:, test_idx]
 
-    link_probability = model.forward(idx_all_pairs[0], idx_all_pairs[1])
-    torch.save(link_probability.detach().cpu(), 'link_probability.pt')
+        train_target = target[train_idx]
+        test_target = target[test_idx]
+
+        model = Shallow(n_nodes, emb_dim).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+        train(model, optimizer, max_step, train_idx_pairs, train_target, cross_entropy)
+        predictions[test_idx] = model(test_idx_pairs[0], test_idx_pairs[1])
+
+    torch.save(predictions.detach().cpu(), 'link_probability.pt')
 
 
     
