@@ -107,8 +107,11 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
     else:
         acc = torch.load('acc.pt', map_location=device)
 
-
-    best_hyperparams_idx = acc.mean(0).argmax()
+    error = acc.mean(0)
+    print(f'Error:')
+    for emb_dim, err in zip(embedding_dim_space, error):
+        print(f'Embedding dimension: {emb_dim:<3}, Error: {err:.5f}')
+    best_hyperparams_idx = error.argmax()
     best_hyperparams = embedding_dim_space[best_hyperparams_idx]
 
     print(f"Training best model, with embedding dimension: {best_hyperparams} and accuracy: {acc.mean(0).max():.5f}")
