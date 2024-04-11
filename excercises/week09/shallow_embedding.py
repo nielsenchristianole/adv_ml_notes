@@ -69,13 +69,13 @@ def train(model: torch.nn.Module, optimizer: torch.optim.Optimizer, max_step: in
     progress_bar.close()
 
 
-def test(model: torch.nn.Module, idx_pairs: torch.Tensor, target: torch.Tensor) -> float:
-    '''Returns the accuracy of the model'''
-    pred = (model(idx_pairs[0], idx_pairs[1]) > 0.5).float()
-    return (pred == target).float().mean().item()
+def test(model: torch.nn.Module, idx_pairs: torch.Tensor, target: torch.Tensor, criterion: torch.nn.Module) -> float:
+    '''Returns the entropy of the model'''
+    pred = model(idx_pairs[0], idx_pairs[1])
+    return criterion(pred, target)
 
 
-def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_space: list[int], estimate_accuracy: bool = False):
+def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_space: list[int], estimate_entropy: bool = False):
     A = torch.load('data.pt', map_location=device)
     n_nodes = A.shape[0]
     idx_all_pairs = torch.triu_indices(n_nodes, n_nodes, 1, device=device)
@@ -83,8 +83,8 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
 
     cross_entropy = torch.nn.BCELoss().to(device)
 
-    if estimate_accuracy:
-        acc = torch.empty((n_splits, len(embedding_dim_space)))
+    if estimate_entropy:
+        ent = torch.empty((n_splits, len(embedding_dim_space)))
         for split_idx, (train_idx, test_idx) in tqdm(enumerate(KFold(n_splits=n_splits, shuffle=True).split(idx_all_pairs[0])), total=n_splits, desc='Splits'):
             train_idx, test_idx = torch.tensor(train_idx), torch.tensor(test_idx)
 
@@ -101,24 +101,24 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
                 train(model, optimizer, max_step, train_idx_pairs, train_target, cross_entropy)
-                accuracy = test(model, test_idx_pairs, test_target)
+                entropy = test(model, test_idx_pairs, test_target, criterion=cross_entropy)
 
-                acc[split_idx, emb_idx] = accuracy
+                ent[split_idx, emb_idx] = entropy
 
-        torch.save(acc.detach().cpu(), 'acc.pt')
+        torch.save(ent.detach().cpu(), 'ent.pt')
     else:
-        acc = torch.load('acc.pt', map_location=device)
-        assert acc.shape[0] == n_splits, 'Number of splits does not match'
-        assert acc.shape[1] == len(embedding_dim_space), 'Number of embedding dimensions does not match'
+        ent = torch.load('ent.pt', map_location=device)
+        assert ent.shape[0] == n_splits, 'Number of splits does not match'
+        assert ent.shape[1] == len(embedding_dim_space), 'Number of embedding dimensions does not match'
 
-    error = acc.mean(0)
+    error = ent.mean(0)
     print(f'Error:')
     for emb_dim, err in zip(embedding_dim_space, error):
         print(f'Embedding dimension: {emb_dim:>3}, Error: {err:.5f}')
-    best_hyperparams_idx = error.argmax()
+    best_hyperparams_idx = error.argmin()
     best_hyperparams = embedding_dim_space[best_hyperparams_idx]
 
-    print(f"Training best model, with embedding dimension: {best_hyperparams} and accuracy: {acc.mean(0).max():.5f}")
+    print(f"Training best model, with embedding dimension: {best_hyperparams} and entropy: {error[best_hyperparams_idx]:.5f}")
 
     predictions = torch.empty(idx_all_pairs.shape[1], device=device, dtype=torch.float32)
     for split_idx, (train_idx, test_idx) in tqdm(enumerate(KFold(n_splits=n_splits, shuffle=True).split(idx_all_pairs[0])), total=n_splits, desc='Splits'):
@@ -130,11 +130,13 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
         train_target = target[train_idx]
         test_target = target[test_idx]
 
-        model = Shallow(n_nodes, emb_dim).to(device)
+        model = Shallow(n_nodes, best_hyperparams).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         train(model, optimizer, max_step, train_idx_pairs, train_target, cross_entropy)
         predictions[test_idx] = model(test_idx_pairs[0], test_idx_pairs[1])
+    
+    print(f'Final entropy: {cross_entropy(predictions, target):.5f}')
 
     torch.save(predictions.detach().cpu(), 'link_probability.pt')
 
@@ -151,7 +153,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_embedding_dim', default=3, type=int, help='minimum embedding dimension')
     parser.add_argument('--max_embedding_dim', default=10, type=int, help='maximum embedding dimension')
     parser.add_argument('--embedding_dim_space', nargs='+', type=int, help='list of embedding dimensions will override min_embedding_dim and max_embedding_dim')
-    parser.add_argument('--estimate_accuracy', action='store_true', help='Estimate accuracy')
+    parser.add_argument('--estimate_entropy', action='store_true', help='Estimate entropy')
 
     args = parser.parse_args()
 
@@ -166,5 +168,4 @@ if __name__ == '__main__':
     n_splits = args.n_splits
     embedding_dim_space = args.embedding_dim_space or list(range(args.min_embedding_dim, args.max_embedding_dim + 1))
 
-
-    main(device, lr, max_step, n_splits, embedding_dim_space, args.estimate_accuracy)
+    main(device, lr, max_step, n_splits, embedding_dim_space, args.estimate_entropy)
