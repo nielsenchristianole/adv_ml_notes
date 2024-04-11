@@ -26,6 +26,7 @@
 
 
 # Import libraries
+import os
 from tqdm import tqdm
 from sklearn.model_selection import KFold
 
@@ -137,6 +138,16 @@ def main(device: str, lr: float, max_step: int, n_splits: int, embedding_dim_spa
         predictions[test_idx] = model(test_idx_pairs[0], test_idx_pairs[1])
     
     print(f'Final entropy: {cross_entropy(predictions, target):.5f}')
+    print(f'Final accuracy: {((predictions > 0.5) == target).float().mean().item():.5f}')
+
+    answer_path = 'link_probability_true.pt'
+    if os.path.exists(answer_path):
+        true_target = torch.load(answer_path).to(device)
+        if true_target.shape == A.shape:
+            true_target = true_target[idx_all_pairs[0], idx_all_pairs[1]]
+
+        print(f'True entropy: {cross_entropy(predictions, true_target):.5f}')
+        print(f'True accuracy: {((predictions > 0.5) == true_target).float().mean().item():.5f}')
 
     torch.save(predictions.detach().cpu(), 'link_probability.pt')
 
