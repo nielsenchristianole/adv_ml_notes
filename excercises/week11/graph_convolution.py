@@ -92,6 +92,11 @@ class SimpleGraphConv(torch.nn.Module):
         #       convolution in the spectral domain. Check that the two 
         #       implementations yield identical results
 
+        Lambda, Q = torch.linalg.eigh(A)
+        diag = (self.h[:, None, None] * torch.pow(Lambda.repeat(self.filter_length, 1, 1), torch.arange(self.filter_length)[:, None, None])).sum(0)
+        node_state_even_cooler = Q @ (diag[:, None, :] * Q.mT) @ X
+        # node_state_cool = Q @ torch.diag_embed(diag, offset=0, dim1=-2, dim2=-1) @ Q.swapaxes(-2, -1) @ X
+
         # ---------------------------------------------------------------------------------------------------------
 
         # Aggregate the node states
